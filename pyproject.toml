@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alignforge"
+version = "0.1.0"
+description = "AlignForge: world-class preference optimization & alignment system (DPO/IPO/KTO/AlignFuse)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "晨星 (CJX0712)" }]
+dependencies = ["numpy>=2.0", "scipy>=1.10"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff==0.16.10"]
+
+[tool.setuptools]
+packages = ["core", "data", "alignment", "pipeline"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q -W ignore::UserWarning"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501", "E741", "W291", "W293"]
+
+[tool.ruff.format]
+quote-style = "double"
