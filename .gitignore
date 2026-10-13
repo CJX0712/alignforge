@@ -1,0 +1,19 @@
+# Byte-compiled / optimized / cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Python venv
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Repo-local scratch (not part of deliverable)
+/tmp/
+*.tmp
