@@ -1,0 +1,14 @@
+# AlignForge 锁定依赖清单（venv 实测冻结，cp313 win_amd64）
+# Author: 晨星 (CJX0712)
+# 安装：python -m pip install -r requirements-lock.txt
+numpy==2.5.3
+scipy==1.18.1
+scikit-learn==1.9.1
+pytest==9.1.1
+ruff==0.16.10
+# ---- 传递依赖（scikit-learn 需要）----
+joblib==1.6.0
+threadpoolctl==3.7.0
+# ---- 工具链传递依赖 ----
+colorama==0.4.6
+packaging==26.3

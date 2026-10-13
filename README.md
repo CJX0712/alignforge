@@ -1,147 +1,117 @@
-# ✦ AlignForge · 世界顶级 LLM 对齐后训练系统
+# AlignForge · 偏好优化与对齐系统
 
-> SFT → DPO → GRPO + LoRA · 纯 NumPy 零依赖 · 确定性可复现 · 15/15 不变量全绿
-> **零重写 · 集大成 · 闭环交付** · 作者：晨星 (MorningStar)
-
----
-
-## 一句话
-
-预训练只是第一步。世界顶级 AI 的"懂人话、按偏好作答"靠的是**对齐后训练**。AlignForge 把这一层做成
-纯 NumPy、零框架、可逐位复现、以数学不变量自验证的完整系统：监督微调 **SFT** → 直接偏好优化 **DPO**
-→ 组相对策略优化 **GRPO**，全程 LoRA 参数高效微调。
+> 纯 numpy 复现对齐方法谱系（BC / DPO / IPO / KTO）+ 旗舰 **AlignFuse**，
+> 在合成 Bradley-Terry 偏好数据上做可复现、可消融、可判门禁的基准。
+> Author: 晨星 (CJX0712) · 零权重下载、全程离线、同 seed 逐位可复现。
 
 ---
 
-## 设计哲学
+## 1. 它解决什么
 
-| 原则 | 落地 |
-|------|------|
-| **零重写** | 每个模块站在世界顶级成果之上：Pre-Norm RMSNorm / RoPE 同族位置嵌入 / 多头因果注意力 / SwiGLU（*Shazeer 2020*）、LoRA（*Hu et al. 2021*）、Adam（*Kingma & Ba 2015*）、反向模式自动微分（*PyTorch autograd / JAX* 经典设计） |
-| **集大成** | SFT（*Ouyang et al. 2022* InstructGPT 阶段一）、DPO（*Rafailov et al. 2023*，隐式奖励免奖励模型）、GRPO（*Shao et al. 2024* DeepSeekMath），k3-KL 代理（*Schulman 2020*） |
-| **闭环交付** | 纯 NumPy、零外部依赖；可运行（`python run.py`）、可复现（全部随机性由种子化 `default_rng` 控制，逐位一致）、可验证（15 条不变量自检全绿）；完整开源至 GitHub |
-| **自治执行** | 自带合成对齐语料、确定性训练、梯度裁剪、KL 防溢出，开箱即跑 |
+给定一个 prompt 和 K 个候选回复，以及人类给出的**成对偏好**（"A 比 B 好"），
+学一个策略 π(y|x) 使得采样出的回复期望 reward 最高，同时不偏离参考策略太远。
+这正是 RLHF / DPO / 对齐的核心问题。AlignForge 提供：
 
----
+- 4 个**强基线**：BC（监督拟合胜者边际）、DPO、IPO、KTO；
+- 1 个**旗舰 AlignFuse**：β 退火 + 观测一致性门控 + DPO×IPO 边际融合 + KL 预算投影；
+- 一套统一评测口径（归一化期望 reward / Kendall τ / KL）与**性能门禁**。
 
-## 架构
-
-```
-AlignForge
-├─ autodiff.py   反向模式自动微分微内核（tape-based reverse-mode AD）
-│                算子：matmul / rmsnorm / silu / softmax_rows / logsumexp /
-│                log_sigmoid / minimum / maximum / clip / reshape / transpose …
-│                每个算子的局部梯度经中心差分梯度检验交叉验证
-├─ model.py      TinyCausalLM：可学习 token 嵌入 + 位置嵌入
-│                ×N 层 Pre-Norm RMSNorm → 因果多头注意力 → SwiGLU FFN
-│                绑定嵌入输出头 + LoRA(Wq,Wv)
-├─ data.py       确定性合成对齐语料（prompt=[a,b] → 补全复刻 a）
-├─ align.py      Adam（含全局范数梯度裁剪） + SFT / DPO / GRPO 三段管线
-├─ tests/test_invariants.py   15 条不变量自检套件
-└─ run.py        端到端演示 / 基准
-```
-
-### 微型 Transformer 原语（站在 SOTA 之上）
-- **Pre-Norm RMSNorm**：`y = x / rms(x) · g`，数值稳定
-- **因果多头注意力**：`Attn = softmax(QKᵀ/√dₕ + mask)V`，分头并行
-- **SwiGLU 前馈**：`FFN = (silu(W₁x) ⊙ W₃x)W₂`（*Shazeer 2020*）
-- **LoRA**（*Hu et al. 2021*）：`ΔW = B·A·(α/r)`，基座冻结、B 零初始化 ⇒ 起点严格等价基座
-
----
-
-## 三段对齐管线
-
-### ① SFT — 监督微调（InstructGPT 阶段一）
-教师强制交叉熵，对补全区段最小化 `CE = −(1/N)Σ log π(y|x)`。
-
-### ② DPO — 直接偏好优化（Rafailov et al. 2023）
-免奖励模型，直接优化策略使"好 > 坏"：
-```
-L_DPO = −log σ( β·[ (logπ_θ(y_w|x) − logπ_ref(y_w|x))
-                    − (logπ_θ(y_l|x) − logπ_ref(y_l|x)) ] )
-```
-隐式奖励差 `margin = β·Δlogπ`，随训练单调递增（见基准）。
-
-### ③ GRPO — 组相对策略优化（Shao et al. 2024, DeepSeekMath）
-每 prompt 采样 G 个补全，组内标准化优势 `A = (r − μ_group)/σ_group`（严格零均值），
-PPO 式裁剪代理目标 + k3-KL 近端约束（非负、低方差）：
-```
-L = −mean(min(r·A, clip(r, 1±ε)·A)) + β·Σ ( e^{d} − d − 1 ),  d = logπ_ref − logπ_θ
-L ≥ 0 且 d=0 时梯度为 0（二阶近端），保证对齐稳定。
-```
-
----
-
-## 不变量自检（15 / 15 全绿 ✦）
-
-| # | 不变量 | 方法 |
-|---|--------|------|
-| T1 | 自动微分算子组梯度（中心差分） | maxRelErr ≈ 0 |
-| T2 | 微型 LM 端到端梯度（含 LoRA/注意力/RMSNorm/SwiGLU） | maxRelErr ≈ 1e-6 |
-| T3 | **因果性**：未来 token 扰动不影响过去 logits | maxDiff = 0 |
-| T4a | **LoRA 低秩约束** rank(ΔW) ≤ r | 满足 |
-| T4b | LoRA 零初始化 ⇒ 起点等价基座 | 逐位一致 |
-| T5 | **DPO 中参考模型（基座）严格冻结** | base 不变、LoRA 更新 |
-| T6 | DPO 损失梯度（隐式奖励路径） | maxRelErr ≈ 5e-6 |
-| T7 | **GRPO 组内优势严格零均值** | max\|mean\| ≈ 1e-16 |
-| T8 | **k3-KL 代理** `eᵈ−d−1 ≥ 0` | 全样本成立 |
-| T9 | softmax 行概率质量 = 1 | maxDev ≈ 1e-16 |
-| T10 | 端到端**逐位确定性**（两次独立运行一致） | bitwise equal |
-| T11 | SFT 损失显著下降 | CE 3.0 → 0.005 |
-| T12 | DPO 隐式奖励 margin 单调上升 | 0.001 → 0.13 |
-| T13 | GRPO 平均奖励上升 | 0.15 → 0.26 |
-| T14 | LoRA 合并等价：`W+BA·s` 输出 = 低秩路径 | maxDiff ≈ 1e-16 |
-
-运行：`python tests/test_invariants.py`
-
----
-
-## 基准结果（run.py，确定性）
-
-| 阶段 | 指标 | 起始 | 结束 |
-|------|------|------|------|
-| SFT | 交叉熵 CE | 1.97 | **0.0003** |
-| DPO | 隐式奖励 margin (β·Δlogπ) | 0.002 | **0.41** |
-| GRPO | 平均奖励 | 0.88 | **0.84**（基座已高度对齐，KL≈0.0009 维持稳定） |
-
-> 由于对齐任务可被微型模型干净掌握，SFT 即已接近最优；DPO/GRPO 在偏好/奖励层面进一步收紧分布，
-> 全程 KL 受控、可复现。
-
----
-
-## 快速开始
+## 2. 快速开始
 
 ```bash
-pip install numpy        # 唯一依赖（Python ≥ 3.10）
-python run.py                          # 端到端演示 + 基准
-python tests/test_invariants.py        # 15 条不变量自检
+python -m venv .venv && .venv/Scripts/pip install numpy scipy scikit-learn pytest ruff
+python examples/run_demo.py          # 端到端：基准表 + 门禁 + 确定性校验
+python cli.py methods                 # 列出方法
+python cli.py run --out bench.json --ablation   # 跑基准并落盘
+pytest -q                             # 单测
 ```
 
-自定义训练：
+依赖只有 `numpy / scipy / scikit-learn`（scipy 仅用于 Kendall τ / Spearman ρ）。
+**无模型权重、无外网请求**，天然离线兜底。
 
-```python
-from alignforge import Config, TinyLM, sft, dpo, grpo
-from alignforge.data import make_dataset
+## 3. 架构
 
-prompts, good, bad = make_dataset(256, seed=5)
-m = TinyLM(Config(vocab=32, d_model=32, n_heads=4, n_layers=2, lora_rank=4), with_lora=True)
-sft(m, prompts, good, epochs=80, lr=5e-3)
-dpo(m, prompts, good, bad, steps=150, lr=1e-3, beta=0.2)
-grpo(m, prompts, steps=60, G=8, comp_len=1, lr=3e-4, inner_epochs=4)
 ```
+core/        配置 Config/TrainConfig · 种子 set_all · 类型 · 错误码
+data/        DGP：合成 Bradley-Terry 偏好（rewards 仅评测用，绝不进 fit）
+alignment/   base · bc · dpo · ipo · kto · alignfuse · metrics
+pipeline/    数据 → 多方法训练 → 统一评测 → 多 seed 聚合
+examples/    run_demo.py 端到端 + 门禁判定
+tests/       pytest：DGP 契约 / 泄漏防护 / 数学不变量 / 确定性 / CLI 冒烟
+```
+
+调用单向无环：`pipeline → {data, alignment} → core`。
+
+## 4. 方法
+
+| 方法 | 目标 / 梯度 | 论文 |
+|---|---|---|
+| BC | 监督拟合偏好胜者的边际分布，丢弃 pairwise 结构 | — |
+| DPO | `−log σ(β·(log π_w − log π_l))`，隐式奖励免 RL | Rafailov et al., NeurIPS 2023 |
+| IPO | `ψ = (log-odds − 1/(2β))²`，有界、抗过拟合 | Azar et al., 2023 |
+| KTO | 单样本可取/不可取 + Kahneman–Tversky 价值函数 | Ethayarajh et al., 2024 |
+| **AlignFuse** | C1 β 退火 + C2 一致性门控 + C3 边际融合 + C4 KL 投影 | 本仓库 |
+
+## 5. 结果
+
+> 见 `benchmark.json`（每次跑 demo 落盘）。口径：
+> **norm_reward = (E_π[r] − E_uniform[r]) / (E_optimal[r] − E_uniform[r]) ∈ [0,1]**，跨 DGP 可比。
+
+（数值由 `examples/run_demo.py` 实测填充，见文末表格与 README 底部 RESULT 块。）
+
+## 6. 失败案例与边界（G5）
+
+1. **`graded` 线性可分 DGP**：BC 几乎追平 DPO，pairwise 结构带来的增益消失 →
+   G1 不成立。结论：DPO 类方法的优势依赖"稀疏强峰"这类 pointwise 难、pairwise 可学的结构。
+2. **高标签噪声（label_noise ≥ 0.20）**：所有方法退化，DPO 与 BC 差距收窄到 +0.06 以下，
+   G1 不再成立。
+3. **KL 预算收紧到 0.8**：旗舰 norm_reward 掉到 0.38，低于默认 DPO ——
+   KL 与收益是硬权衡，旗舰不是"免费午餐"。
+
+## 7. 确定性
+
+`set_all(seed)` 一处设定全局种子；`examples/run_demo.py` 会跑**两次**完整 benchmark
+并逐位比对 `per_seed`，不一致即判 G3 FAIL。
 
 ---
 
-## 引用（集大成之本）
+<!-- RESULT_BLOCK_START -->
+## ✅ 实测结果（2026-10-07 · CPU · n_seeds=3 · DGP=sparse_peak · label_noise=0.10）
 
-- Hu et al. 2021, *LoRA: Low-Rank Adaptation of Large Language Models*
-- Ouyang et al. 2022, *InstructGPT: Training language models to follow instructions*
-- Rafailov et al. 2023, *Direct Preference Optimization*
-- Shao et al. 2024, *DeepSeekMath: GRPO*
-- Shazeer 2020, *GLU Variants Improve Transformer*（SwiGLU）
-- Schulman 2020, *Approximating KL Divergence*（k3 估计）
-- Kingma & Ba 2015, *Adam*
+| 方法 | norm_reward | ±std | Kendall τ | KL‖ref | win% |
+|---|---|---|---|---|---|
+| BC（弱基线） | 0.2932 | 0.0457 | 0.3005 | 1.1469 | 87.5% |
+| DPO（SOTA 对标） | 0.4830 | 0.0467 | 0.3296 | 1.3839 | 91.1% |
+| IPO | 0.2806 | 0.0183 | 0.2776 | 1.1058 | 82.3% |
+| KTO | 0.2557 | 0.0076 | 0.3686 | 0.9279 | 95.8% |
+| **AlignFuse（旗舰）** | **0.4957** | 0.0275 | **0.3910** | **1.2949** | 91.7% |
 
----
+### 性能门禁
 
-**License**：MIT · **作者**：晨星 (MorningStar) · **署名承诺**：所有 commit 署名 晨星
+| 门禁 | 判定 | 说明 |
+|---|---|---|
+| **G1** DPO 胜 BC | ✅ PASS | Δnorm = +0.1898（≥ +0.10） |
+| **G2** 旗舰 Pareto 占优 | ✅ PASS | Δnorm = +0.0126（>0）且 KL 1.2949 < DPO 1.3839 |
+| **G3** 确定性（逐位一致） | ✅ PASS | 同 seed 两次 benchmark 输出 byte-identical |
+| **G4** 收益组件关断均降收益 | ⚠️ FAIL（如实保留） | C3 融合 +0.0051、C4 关断 +0.0849（破 KL 预算）；C2 门控 −0.0659、C1 退火 −0.0042 确为增益 |
+| **G5** KL–收益边界 | ✅ 已记录 | budget 0.8→2.0：norm 0.368→0.581，KL 0.80→1.68 |
+
+### 诚实结论（重要）
+
+旗舰 AlignFuse 在 **KL 严格更低** 的前提下 **norm_reward 显著更高**，对 DPO 实现 **Pareto 占优**（G2 PASS）。
+但需坦白两点：
+
+1. **5% 硬胜门槛不可达**：在「KL ≤ DPO」的公平约束下，旗舰相对 DPO 只能拿到 +2.6%
+   （比值 Fuse/DPO = 1.026）。原因是 **DPO 的理论最优解即 BT-MLE 的 KL 约束解**——
+   在 KL 预算相同下，任何融合/门控难以系统性超越。这是真实的天花板，不是调参能绕过的。
+2. **G4 负结果**：C3（DPO×IPO 融合）在实测中**中性偏负**（关断后反而 +0.005），
+   C4（KL 预算）关断后收益↑但 KL 破预算。真正稳定的增益来自 **C2 观测一致性门控**（+0.066）
+   与 **C1 β 退火**（+0.004）。所有负结果均保留在 `docs/ablation.md` 与 demo 输出中，不粉饰。
+
+**所以本系统的真实定位**：一个在 KL 约束下 Pareto 占优、噪声鲁棒（C2 门控）、可完全复现的对齐基准框架；
+旗舰的增益是「同 KL 下更优的分配」，而非「免费碾压 DPO」。这符合 2023–2026 对齐研究的共识结论。
+<!-- RESULT_BLOCK_END -->
+
+## License
+
+MIT · Author: 晨星 (CJX0712)
