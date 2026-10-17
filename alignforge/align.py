@@ -6,10 +6,11 @@
 # 确定性可复现：所有随机性来自种子化的 default_rng。
 # 作者：晨星
 from __future__ import annotations
+
 import numpy as np
+
 from . import autodiff as ad
 from .autodiff import const
-from .model import TinyLM
 
 
 # ---------------- Adam（Kingma & Ba 2015，含偏置校正） ----------------

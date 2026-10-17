@@ -2,13 +2,15 @@
 # AlignForge · 端到端演示 / 基准（确定性可复现）
 # 运行：python run.py
 # 管线：SFT → DPO → GRPO，每段以可验证指标与硬不变量度量。作者：晨星
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 import numpy as np
-from alignforge import Config, TinyLM, sft, dpo, grpo
+
+from alignforge import Config, TinyLM, dpo, grpo, sft
 from alignforge.data import make_dataset, target_of
-from alignforge.align import reward_fn
 
 
 def topk(model, prompt, k=5):
@@ -45,7 +47,8 @@ def main():
 
     # ---- 演示：对齐前（ref=SFT 基座） vs 对齐后 ----
     print("\n[演示] prompt→补全 top-3 预测（对齐后策略）")
-    m_ref = TinyLM(cfg, with_lora=False); m_ref.restore(m.snapshot())  # 仅取基座即 SFT 后
+    m_ref = TinyLM(cfg, with_lora=False)
+    m_ref.restore(m.snapshot())  # 仅取基座即 SFT 后
     for a, b in [(2, 5), (4, 7), (9, 3)]:
         p = np.array([a, b])
         tgt = target_of(p[None, :])[0]

@@ -4,9 +4,11 @@
 # 作用于每层 Wq/Wv（ΔW = B·A·scale，基座冻结）。
 # 作者：晨星
 from __future__ import annotations
+
 import numpy as np
+
 from . import autodiff as ad
-from .autodiff import Node, const, param
+from .autodiff import const, param
 
 
 class Config:

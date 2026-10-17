@@ -6,6 +6,7 @@
 # 该信号在 SFT→DPO→GRPO 三段中均可量化放大，使对齐效果清晰可验证。
 # 作者：晨星
 from __future__ import annotations
+
 import numpy as np
 
 PROMPT_ATTRS = list(range(2, 10))      # prompt 首 token 候选（属性/人格）

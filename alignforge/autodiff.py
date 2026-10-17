@@ -3,6 +3,7 @@
 # 反向遍历 tape 累积梯度。所有 op 手写并经中心差分梯度检验交叉验证。
 # 作者：晨星
 from __future__ import annotations
+
 import numpy as np
 
 
@@ -216,7 +217,6 @@ def log_sigmoid(x):
 
 
 def sum_axis(x: Node, axis=-1):
-    n = x.v.shape[axis]
     def bwd(g):
         return (np.broadcast_to(np.expand_dims(g, axis), x.v.shape).copy(),)
     return Node(x.v.sum(axis=axis), (x,), bwd)

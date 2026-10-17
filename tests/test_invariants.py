@@ -2,14 +2,17 @@
 # AlignForge · 不变量自检套件（可独立运行：python tests/test_invariants.py）
 # 每条不变量 = 一条可被交叉验证的硬金标准。全绿才算交付。
 # 作者：晨星
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
-from alignforge import ad, Config, TinyLM, sft, dpo, grpo, reward_fn
-from alignforge.autodiff import const
-from alignforge.data import make_dataset, target_of, sequences
+
+from alignforge import Config, TinyLM, ad, dpo, grpo, reward_fn, sft
 from alignforge.align import per_seq_logp
+from alignforge.autodiff import const
+from alignforge.data import make_dataset
 
 RESULTS = []
 
@@ -30,8 +33,6 @@ def small_model(**kw):
 def grad_check(loss_fn, params, n_check=8, tol=2e-5, eps=1e-6, seed=0):
     """中心差分梯度检验：返回最大相对误差。"""
     rng = np.random.default_rng(seed)
-    # 干扰梯度注入，确保每层均有随机扰动（避免对称位）
-    noise = [p.v * 0 + rng.normal(0, 0.05, p.v.shape) for p in params]
     loss0 = loss_fn()
     loss0.backward()
     ana = [p.g.copy() if p.g is not None else np.zeros_like(p.v) for p in params]
@@ -100,7 +101,8 @@ def t3_causal_mask():
     rng = np.random.default_rng(2)
     ids = rng.integers(2, m.cfg.vocab, size=(2, 6))
     l1 = m.logits_np(ids)[:, :4, :]
-    ids2 = ids.copy(); ids2[:, 4:] = (ids2[:, 4:] + 5) % m.cfg.vocab
+    ids2 = ids.copy()
+    ids2[:, 4:] = (ids2[:, 4:] + 5) % m.cfg.vocab
     l2 = m.logits_np(ids2)[:, :4, :]
     ok = np.allclose(l1, l2, atol=1e-12)
     check("T3 因果性：未来 token 扰动不影响过去 logits", ok,
